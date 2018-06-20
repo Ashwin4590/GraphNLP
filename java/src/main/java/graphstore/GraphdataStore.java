@@ -1,152 +1,213 @@
 package graphstore;
 
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
-import org.janusgraph.core.JanusGraph;
-import org.janusgraph.core.JanusGraphFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.Map;
-import java.util.concurrent.Executors;
-
-import io.grpc.Server;
-import io.grpc.ServerBuilder;
-import io.grpc.stub.StreamObserver;
-import graphstore.GraphStoreBasic.Empty;
-
-import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
+import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
+import org.codehaus.jettison.json.JSONArray;
+import org.codehaus.jettison.json.JSONException;
+import org.codehaus.jettison.json.JSONObject;
 import org.janusgraph.core.JanusGraph;
 import org.janusgraph.core.JanusGraphFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.util.Map;
-import java.util.Optional;
+
+import java.io.*;
+import java.net.*;
+import java.util.*;
 
 public class GraphdataStore {
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphdataStore.class);
 
-    protected Server server;
-    protected ConfigReader config;
+    JanusGraph graph;
+    GraphTraversalSource g;
+    String analysisPath;
+    long nodeCsvId;
+    long edgeCsvId;
+    boolean firstCsvAppend;
+    boolean captureGephiData;
+    Map<String, Long> nodeCsvIdDict;
 
-
-    public GraphdataStore(ConfigReader config) {
-        this.config = config;
-    }
-
-    private void start(int port, int numThreads) throws IOException {
-        server = ServerBuilder.forPort(port)
-                .addService(new GraphdataStoreImpl())
-                .executor(Executors.newFixedThreadPool(numThreads))
-                .build()
-                .start();
-        LOGGER.info("Server started, listening on " + port);
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            @Override
-            public void run() {
-                System.err.println("*** shutting down gRPC server since JVM is shutting down");
-                GraphdataStore.this.stop();
-                System.err.println("*** server shut down");
-            }
-        });
-    }
-
-    private void stop() {
-        if (server != null) {
-            server.shutdown();
-        }
-    }
-
-    private void blockUntilShutdown() throws InterruptedException {
-        if (server != null) {
-            server.awaitTermination();
-        }
-    }
-
-    public static void main(String[] args) throws Exception{
-        //JanusGraph graph = JanusGraphFactory.open("conf/janusgraph-berkeleyje-lucene.properties");
-        //GraphTraversalSource g = graph.traversal();
-        //if (g.V().count().next() == 0) {
-            // load the schema and graph data
-            //GraphOfTheGodsFactory.load(graph);
-        //}
-        //Map<String, ?> saturnProps = g.V().has("name", "saturn").valueMap(true).next();
-        //LOGGER.info(saturnProps.toString());
-        //List<Edge> places = g.E().has("place", Geo.geoWithin(Geoshape.circle(37.97, 23.72, 50))).toList();
-        //LOGGER.info(places.toString());
-        //System.exit(0);
-        //JanusGraph graph = JanusGraphFactory.build()
-        //        .set("storage.backend", "hbase")
-        //        .open();
-
-
-        JanusGraph graph = JanusGraphFactory.open("conf/janusgraph-hbase.properties");
-        //graph = JanusGraphFactory.open("inmemory");
-        GraphTraversalSource g;
+    public GraphdataStore() {
+        //ConfiguredGraphFactory.open("graph1");
+        graph = JanusGraphFactory.open("conf/janusgraph-hbase.properties");
         g = graph.traversal();
+        analysisPath = "analysis/";
+        nodeCsvId = 1;
+        edgeCsvId = 1;
+        firstCsvAppend = true;
+        captureGephiData = true;
+        nodeCsvIdDict = new HashMap<>();
+    }
 
-        //g.addV("person").property("name", "ashwin").next();
-        //g.addV("person").property("name", "ramesh").next();
-        //System.out.println(g.V().has("name","ashwin"));
-        //System.out.println(g.V().has("name","ashwin").id());
-        final Optional<Map<String, Object>> v = g.V().has("name", "saturn").valueMap(true).tryNext();
-        if (v.isPresent()) {
-            LOGGER.info(v.get().toString());
+    private void writeToFile(String fname, String data) throws IOException {
+        PrintWriter writer = new PrintWriter(analysisPath+fname, "UTF-8");
+        writer.println(data);
+        writer.close();
+    }
+
+    private void writeToCsvFile(String fname, String data) throws IOException {
+        //nodes.csv-Id,Label,Entity
+        //edges.csv-Source,Target,Type,Id,Label,Weight
+        Writer output;
+        output = new BufferedWriter(new FileWriter(analysisPath+fname));  //clears file every time
+        output.append(data);
+        output.close();
+    }
+
+    private Vertex checkIfVertexPresent(String value) {
+        Vertex ret = null;
+        final Optional<Vertex> vert = g.V().has("value", value).tryNext();
+        if (vert.isPresent()) {
+            ret = vert.get();
+            System.out.println("Vertex already present:" + ret.toString());
         } else {
-            LOGGER.warn("saturn not found");
+            System.out.println("Vertex not present");
+        }
+        return ret;
+    }
+
+    private void appendGraphData(JSONObject jsonObj) throws JSONException, IOException {
+        JSONArray vertices = (JSONArray) jsonObj.get("vertices");
+        JSONArray edges = (JSONArray) jsonObj.get("edges");
+        JSONArray entities = (JSONArray) jsonObj.get("entities");
+        JSONArray sentiment = (JSONArray) jsonObj.get("sentiment");
+
+        String nodeCsvData = "";
+        String edgeCsvData = "";
+        if(captureGephiData) {
+            if (firstCsvAppend) {
+                nodeCsvData += "Id,Label,Entity";
+                edgeCsvData += "Source,Target,Type,Id,Label,Weight";
+                firstCsvAppend = false;
+            }
         }
 
-        //Vertex xyz = graph.addVertex();
+        int vertexCounter;
+        int edgeCounter = 0;
+        String v1_str = "";
+        String v2_str = "";
+        for(vertexCounter=1; vertexCounter<vertices.length(); vertexCounter+=2,edgeCounter += 1) {
+            v1_str = (String) vertices.get(vertexCounter-1);
+            v2_str = (String) vertices.get(vertexCounter);
+            Vertex v1 = checkIfVertexPresent(v1_str);
+            if (v1 == null) {
+                v1 = graph.addVertex();
+                v1.property("value", vertices.get(vertexCounter-1));
+                v1.property("entity", entities.get(vertexCounter-1));
+                System.out.println("NOUN:ENTITY: " + vertices.get(vertexCounter-1) + ":" + entities.get(vertexCounter-1));
+                if(captureGephiData) {
+                    nodeCsvIdDict.put(vertices.get(vertexCounter - 1).toString(), nodeCsvId);
+                    nodeCsvData += "\n" + String.valueOf(nodeCsvId) + "," + vertices.get(vertexCounter - 1) + "," + entities.get(vertexCounter - 1);
+                    nodeCsvId += 1;
+                }
+            }
+            Vertex v2 = checkIfVertexPresent(v2_str);
+            if (v2 == null) {
+                v2 = graph.addVertex();
+                v2.property("value", vertices.get(vertexCounter));
+                v2.property("entity", entities.get(vertexCounter));
+                System.out.println("NOUN:ENTITY: " + vertices.get(vertexCounter) + ":" + entities.get(vertexCounter));
+                if(captureGephiData) {
+                    nodeCsvIdDict.put(vertices.get(vertexCounter).toString(), nodeCsvId);
+                    nodeCsvData += "\n" + String.valueOf(nodeCsvId) + "," + vertices.get(vertexCounter) + "," + entities.get(vertexCounter);
+                    nodeCsvId += 1;
+                }
+            }
 
-        //v[4344]
-
-        // Add a property
-        //xyz.property("name", "ramesh");
-
+            //v1.addEdge(String.valueOf(edges.get(edgeCounter)),v2);
+            g.V(v2).as("a").V(v1).addE(String.valueOf(edges.get(edgeCounter))).property("sentiment", sentiment.get(edgeCounter)).from("a").next();
+            if(captureGephiData) {
+                edgeCsvData += "\n" + nodeCsvIdDict.get(v2.value("value")) + "," + nodeCsvIdDict.get(v1.value("value")) + "," + "directed" + "," + edgeCsvId + "," + String.valueOf(edges.get(edgeCounter)) + "," + String.valueOf(Integer.parseInt(sentiment.get(edgeCounter).toString()));
+                edgeCsvId += 1;
+            }
+        }
         // Commit the transaction
-        //graph.tx().commit();
+        graph.tx().commit();
 
-        // Check to make sure our new vertex was created
-        //g.V().has("name","ramesh");
+        if(captureGephiData) {
+            writeToCsvFile("nodes.csv", nodeCsvData);
+            writeToCsvFile("edges.csv", edgeCsvData);
+        }
+    }
 
-        //v[4344]
+    private String process(String text, Socket clientSocket) throws JSONException, IOException {
+        JSONObject jsonObj = new JSONObject(text);
+        String operation = (String) jsonObj.get("operation");
+        String ret = "";
 
-        //final Optional<Map<String, Object>> v = g.V().has("name", "me").valueMap(true).tryNext();
-        //if (v.isPresent()) {
-            //LOGGER.info(v.get().toString());
-        //} else {
-            //LOGGER.warn("me not found");
-        //}
+        if (operation.compareTo("append_graph_data") == 0) {
+            appendGraphData(jsonObj);
+        } else if (operation.compareTo("get_all_persons") == 0) {
+            String persons = g.V().has("entity", "PERSON").values("value").toList().toString();
+            writeToFile("get_all_persons.txt", persons.replace("[", "").replace("]", "").replaceAll(",", "\n"));
+        } else if (operation.compareTo("get_all_persons_with_degree") == 0) {
+            final List<Object> persons = g.V().has("entity", "PERSON").values("value").toList();
+            Map<String, String> result = new HashMap<>();
+            for(Object person: persons) {
+                result.put(String.valueOf(person),String.valueOf(g.V().has("value", String.valueOf(person)).both().values("value").dedup().toList().size()));
+            }
+            writeToFile("get_all_persons_with_degree.txt", GraphUtils.sortByValue(result).toString().replace("{", "").replace("}", "").replaceAll(",", "\n"));
+        } else if (operation.compareTo("get_sentiment_around_person") == 0) {
+            String person = (String) jsonObj.get("person");
+            Vertex personV = (Vertex) g.V().has("value", person).toList().get(0);
+            List<Edge> neighboringEList = g.V(personV).outE().toList();
+            Map<String, Integer> sentimentMap = new HashMap<>();
+            for(Edge neighborE: neighboringEList) {
+                System.out.println(neighborE.outVertex().value("value").toString());
+                System.out.println(neighborE.inVertex().value("value").toString());
+                System.out.println(neighborE.value("sentiment").toString());
+                String inVertex =  neighborE.inVertex().value("value").toString();
+                int sentimentValue = Integer.parseInt(neighborE.value("sentiment").toString());
+                if(sentimentMap.containsKey(inVertex)) {
+                    sentimentMap.put(inVertex, sentimentMap.get(inVertex) + sentimentValue);
+                } else {
+                    sentimentMap.put(inVertex, sentimentValue);
+                }
+            }
+            System.out.println( GraphUtils.sortByValue(sentimentMap).toString());
+            writeToFile(person + "_sentiments.txt", GraphUtils.sortByValue(sentimentMap).toString().replace("{", "").replace("}", "").replaceAll(",", "\n"));
+        }
+        //GraphTraversalSource g = graph.traversal();
 
-        File configf = new File("../configs/configCentralized.txt");
-        ConfigReader config = new ConfigReader(configf);
+        return ret;
+    }
 
-        final GraphdataStore server = new GraphdataStore(config);
-        server.start(config.getBlockPort(), 2);
-        server.blockUntilShutdown();
+    private void start(int port) throws IOException, JSONException {
+        String request;
+        ServerSocket Server = new ServerSocket(port);
+        System.out.println("TCPServer Waiting for client on port " + port);
+        BufferedReader br;
+        PrintWriter outs;
+        String response;
+        while (true) {
+            Socket connected = Server.accept();
+            System.out.println(" THE CLIENT" + " " + connected.getInetAddress() + ":" + connected.getPort() + " IS CONNECTED ");
+
+            br = new BufferedReader(new InputStreamReader(connected.getInputStream()));
+            request = br.readLine();
+            response = process(request, connected);
+            System.out.println("RECEIVED FROM CLIENT: " + request);
+        }
+    }
+
+    private void deleteGraph() {
+        g.V().drop().iterate();
+        g.tx().commit();
+    }
+
+    private void test() throws IOException {
+        final List<Object> persons = g.V().has("entity", "LOCATION").values("value").toList();
+        System.out.println(persons);
+    }
+
+    public static void main(String[] args) throws Exception {
+        final GraphdataStore server = new GraphdataStore();
+        server.start(7183);
+
+        //server.test();
+
+        //server.deleteGraph();
 
         System.out.println("Program Ended");
-    }
-
-    static class GraphdataStoreImpl extends GraphdataStoreGrpc.GraphdataStoreImplBase {
-
-        //Map<String, byte[]> blockMap;
-
-        GraphdataStoreImpl() {
-            super();
-            //this.blockMap = new HashMap<>();
-        }
-
-        @Override
-        public void ping(Empty req, final StreamObserver<Empty> responseObserver) {
-            Empty response = Empty.newBuilder().build();
-            responseObserver.onNext(response);
-            responseObserver.onCompleted();
-        }
-
-        // TODO: Implement the other RPCs!
-
     }
 }

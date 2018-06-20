@@ -12,3 +12,13 @@ service GraphdataStore {
 // but do not change the provided fields or their names.  You can also add additional
 // message definitions as you'd like.
 message Empty { }
+
+message RelationshipType {
+    required string vertex1 = 1;
+    required string vertex2 = 2;
+	required string edge = 3;
+}
+
+message Relationships {
+	repeated RelationshipType relation = 1;
+}
