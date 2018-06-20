@@ -1,0 +1,2 @@
+strongman tactics=2
+ American military exercises=1

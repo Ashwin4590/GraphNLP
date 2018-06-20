@@ -1,7 +1,22 @@
 Id,Label,Entity
-1,Obama administration,PERSON
-2,trade deal,-
-3,Mr. Trump,PERSON
-4,Trans-Pacific Partnership,-
-5,Canada,LOCATION
-6,10 other nations,-
+1,leader,-
+2,North Korea,LOCATION
+3,Kim Jong-un,PERSON
+4,strongman tactics,-
+5,Trump,PERSON
+6,money,-
+7,waste,-
+8,South Korea,LOCATION
+9,American military exercises,-
+10,Friday,-
+11,Obama administration,PERSON
+12,trade deal,-
+13,Trans-Pacific Partnership,-
+14,Canada,LOCATION
+15,10 other nations,-
+16,extravagant coverage,-
+17,meeting,-
+18,former State Department official,ORGANIZATION
+19,Joseph Y. Yun,PERSON
+20,United States,LOCATION
+21,different relationship,-

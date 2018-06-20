@@ -1,2 +1,4 @@
-President Trump=2
- Kim Jong-un=1
+Kim Jong-un=3
+ Joseph Y. Yun=3
+ Trump=3
+ Obama administration=1

@@ -26,6 +26,7 @@ public class GraphdataStore {
     boolean firstCsvAppend;
     boolean captureGephiData;
     Map<String, Long> nodeCsvIdDict;
+    Map<String, String> personMap;
 
     public GraphdataStore() {
         //ConfiguredGraphFactory.open("graph1");
@@ -37,6 +38,13 @@ public class GraphdataStore {
         firstCsvAppend = true;
         captureGephiData = true;
         nodeCsvIdDict = new HashMap<>();
+        personMap = new HashMap<String,String>() {
+            {
+                put("President Trump", "Trump");
+                put("Mr. Trump", "Trump");
+                put("Mr. Kim", "Kim Jong-un");
+            }
+        };
     }
 
     private void writeToFile(String fname, String data) throws IOException {
@@ -49,7 +57,7 @@ public class GraphdataStore {
         //nodes.csv-Id,Label,Entity
         //edges.csv-Source,Target,Type,Id,Label,Weight
         Writer output;
-        output = new BufferedWriter(new FileWriter(analysisPath+fname));  //clears file every time
+        output = new BufferedWriter(new FileWriter(analysisPath+fname,true));  //clears file every time
         output.append(data);
         output.close();
     }
@@ -86,30 +94,37 @@ public class GraphdataStore {
         int edgeCounter = 0;
         String v1_str = "";
         String v2_str = "";
+        String value_str ="";
         for(vertexCounter=1; vertexCounter<vertices.length(); vertexCounter+=2,edgeCounter += 1) {
             v1_str = (String) vertices.get(vertexCounter-1);
             v2_str = (String) vertices.get(vertexCounter);
+            if(personMap.containsKey(v1_str)) {
+                v1_str = personMap.get(v1_str);
+            }
+            if(personMap.containsKey(v2_str)) {
+                v2_str = personMap.get(v2_str);
+            }
             Vertex v1 = checkIfVertexPresent(v1_str);
             if (v1 == null) {
                 v1 = graph.addVertex();
-                v1.property("value", vertices.get(vertexCounter-1));
+                v1.property("value", v1_str);
                 v1.property("entity", entities.get(vertexCounter-1));
-                System.out.println("NOUN:ENTITY: " + vertices.get(vertexCounter-1) + ":" + entities.get(vertexCounter-1));
+                System.out.println("NOUN:ENTITY: " + v1_str + ":" + entities.get(vertexCounter-1));
                 if(captureGephiData) {
-                    nodeCsvIdDict.put(vertices.get(vertexCounter - 1).toString(), nodeCsvId);
-                    nodeCsvData += "\n" + String.valueOf(nodeCsvId) + "," + vertices.get(vertexCounter - 1) + "," + entities.get(vertexCounter - 1);
+                    nodeCsvIdDict.put(v1_str, nodeCsvId);
+                    nodeCsvData += "\n" + String.valueOf(nodeCsvId) + "," + v1_str + "," + entities.get(vertexCounter - 1);
                     nodeCsvId += 1;
                 }
             }
             Vertex v2 = checkIfVertexPresent(v2_str);
             if (v2 == null) {
                 v2 = graph.addVertex();
-                v2.property("value", vertices.get(vertexCounter));
+                v2.property("value", v2_str);
                 v2.property("entity", entities.get(vertexCounter));
-                System.out.println("NOUN:ENTITY: " + vertices.get(vertexCounter) + ":" + entities.get(vertexCounter));
+                System.out.println("NOUN:ENTITY: " + v2_str + ":" + entities.get(vertexCounter));
                 if(captureGephiData) {
-                    nodeCsvIdDict.put(vertices.get(vertexCounter).toString(), nodeCsvId);
-                    nodeCsvData += "\n" + String.valueOf(nodeCsvId) + "," + vertices.get(vertexCounter) + "," + entities.get(vertexCounter);
+                    nodeCsvIdDict.put(v2_str, nodeCsvId);
+                    nodeCsvData += "\n" + String.valueOf(nodeCsvId) + "," + v2_str + "," + entities.get(vertexCounter);
                     nodeCsvId += 1;
                 }
             }
@@ -202,11 +217,10 @@ public class GraphdataStore {
 
     public static void main(String[] args) throws Exception {
         final GraphdataStore server = new GraphdataStore();
+        server.deleteGraph();
         server.start(7183);
 
         //server.test();
-
-        //server.deleteGraph();
 
         System.out.println("Program Ended");
     }
