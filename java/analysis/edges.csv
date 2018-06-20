@@ -1,0 +1,6 @@
+Source,Target,Type,Id,Label,Weight
+2,1,directed,1,championed by,2
+2,3,directed,2,abandoned by,1
+4,2,directed,3,-,1
+5,4,directed,4,is trying to revive,1
+6,5,directed,5,Along with,1
